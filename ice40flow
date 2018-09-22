@@ -1,0 +1,114 @@
+#!/bin/bash
+# Script by Al Williams (Hackaday)
+
+#### Things you might want to change:
+#### Note that none of these will clobber what's already there
+#### In the environment/env file/command line
+
+    # Note: Yosys chokes on spaces in library directories (reported to yosys)
+# Library path if not overriden (environment)
+DEF_YOSYS_LIBDIR=".:library"
+# Default yosys options
+DEF_YOSYS_OPTS=
+# Default read_verilog options
+DEF_YOSYS_V_OPTS=-noautowire
+# default Arachne-pnr options
+DEF_ARACHNE_OPTS=-d\ 1k
+# default icetime options
+DEF_ICETIME_OPTS=-d\ hx1k
+# default project name
+DEF_YOSYS_PROJECT=
+
+# You probably don't need to change much below this line
+
+# for -n option. Put it here so you can override the default
+# in the env file but that's not likely to happen
+PROG=1
+
+# Set per directory defaults
+# look for ice40flow.env in current directory
+if [ -f ice40flow.env ]
+then
+    # Note that if you want to not clobber existing environment
+    # You should set the DEF_ variables from above
+    # If you set the others you will override command line/user environment
+    # which is probably not what you want
+    source ice40flow.env
+fi    
+
+
+    # Note: Yosys chokes on spaces in library directories (reported to yosys)
+# Library path if not overriden (environment)
+YOSYS_LIBDIR=${YOSYS_LIBDIR:-$DEF_YOSYS_LIBDIR}
+# Default yosys options
+YOSYS_OPTS=${YOSYS_OPTS:-$DEF_YOSYS_OPTS}
+# Default read_verilog options
+YOSYS_V_OPTS=${YOSYS_V_OPTS:-$DEF_YOSYS_V_OPTS}
+# default Arachne-pnr options
+ARACHNE_OPTS=${ARACHNE_OPTS:-$DEF_ARACHNE_OPTS}
+# default icetime options
+ICETIME_OPTS=${ICETIME_OPTS:-$DEF_ICETIME_OPTS}
+# Default project
+YOSYS_DEFPROJECT=${YOSYS_DEFPROJECT:-$DEF_YOSYS_PROJECT}
+
+
+
+
+# Handle -n options (didn't use getopts for one option)
+# Note the default is set before reading env
+# so if you wanted to never program you could
+# set PROG=0 in the env file
+# but there would be no good way to override
+# Maybe put PROG=${PROG:-0} so you could say
+# PROG=1 ice40flow to program? I don't know...
+if [ "$1" == "-n" ]
+then
+    PROG=0
+    shift
+fi
+
+
+
+# If you provide project name in environment we will
+# use that unless you provide the name on the command line
+# No project is an error
+FN=${1-$YOSYS_DEFPROJECT}
+if [ ! -z "$FN" -a ! -f "$FN.v" ]
+then
+    echo 1>&2 "Can't find $FN.v"
+    unset FN
+fi
+
+if [ -z "$FN" ]
+then
+    echo 1>&2 "Usage: ice40flow [-n] project"
+    echo 1>&2 "  -n = Do not program device"
+    echo 1>&2 "  Note: project name of foo implies foo.v exists"
+    echo 1>&2 "        do not supply the .v suffix on the project name"
+    echo 1>&2 "  You can set the following options in the environment or in ice40flow.env:"
+    echo 1>&2 "    YOSYS_DEFPROJECT = default project name if not specified on command line"
+    echo 1>&2 "    YOSYS_LIBDIR = Colon separated directories to search (no spaces)"
+    echo 1>&2 "    YOSYS_OPTS = Options to pass to yosys (try -Qq for quiet output)"
+    echo 1>&2 "    YOSYS_V_OPTS = Options to pass to yosys read_verilog (default -noautowire)"
+    echo 1>&2 "    ARACHNE_OPTS = Options to pass to Arachne-pnr (default  -d 1k)"
+    echo 1>&2 "    ICETIME_OPTS = Options to pass to icetime (default -d hx1k)"		  
+    exit 1
+fi
+yosys $YOSYS_OPTS <<EOF~
+read_verilog $YOSYS_V_OPTS "$FN.v"
+$( IFS=':'; for LD in $YOSYS_LIBDIR; do echo hierarchy -libdir $LD ; done )
+synth_ice40 -blif "$FN.blif"
+EOF~
+if [ $? != 0 ]
+then exit
+fi
+if ! arachne-pnr $ARACHNE_OPTS -p "$FN.pcf"  -o "$FN.txt" "$FN.blif"
+then exit
+fi
+icetime $ICETIME_OPTS -p "$FN.pcf" -mtr "$FN.rpt" "$FN.txt"
+icepack $FN.txt $FN.bin
+if [ $PROG == 1 ]
+then iceprog $FN.bin
+else
+    echo 1>&2 "Programming disabled by -n option"
+fi
