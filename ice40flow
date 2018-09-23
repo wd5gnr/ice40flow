@@ -94,10 +94,27 @@ then
     echo 1>&2 "    ICETIME_OPTS = Options to pass to icetime (default -d hx1k)"		  
     exit 1
 fi
+
+# temporary test to warn people about Yosys not liking spaces in the libdir
+if [[ "$YOSYS_LIBDIR" =~ " " ]]
+then
+    echo 1>&2 "Error: Yosys currently won't accept spaces in library directory names!"
+    echo 1>&2 "Please change the library path and try again."
+    exit 99
+fi    
+
+if [[ "$FN" =~ " " ]]
+then
+    echo 1>&2 "Error: Please do not use spaces in the project name!"
+    exit 98
+fi    
+
+
+
 yosys $YOSYS_OPTS <<EOF~
 read_verilog $YOSYS_V_OPTS "$FN.v"
 $( IFS=':'; for LD in $YOSYS_LIBDIR; do echo hierarchy -libdir $LD ; done )
-synth_ice40 -blif "$FN.blif"
+synth_ice40 -blif $FN.blif
 EOF~
 if [ $? != 0 ]
 then exit
